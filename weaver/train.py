@@ -173,7 +173,6 @@ parser.add_argument('--inter-man-att-method',  type=str, default='dist',choices=
                     help='Determines which method of inter_manifold attention to use either v1 or v2')
 
 
-
 def to_filelist(args, mode='train'):
     if mode == 'train':
         flist = args.data_train
@@ -284,14 +283,9 @@ def train_load(args):
                                  infinity_mode=args.steps_per_epoch_val is not None,
                                  in_memory=args.in_memory,
                                  name='val' + ('' if args.local_rank is None else '_rank%d' % args.local_rank))
-    print(f"train workers = {min(args.num_workers, int(len(train_files) * args.file_fraction))}")
     train_loader = DataLoader(train_data, batch_size=args.batch_size, drop_last=True, pin_memory=True,
                               num_workers=min(args.num_workers, int(len(train_files) * args.file_fraction)),
                               persistent_workers=args.num_workers > 0 and args.steps_per_epoch is not None)
-    print(val_files)
-    print(f"val files = {len(val_files)}")
-    print(f"file fraction = {args.file_fraction}")
-    print(f"val workers = {min(args.num_workers, int(len(val_files) * args.file_fraction))}")
     val_loader = DataLoader(val_data, batch_size=args.batch_size, drop_last=True, pin_memory=True,
                             num_workers=min(args.num_workers, int(len(val_files) * args.file_fraction)),
                             persistent_workers=args.num_workers > 0 and args.steps_per_epoch_val is not None)
@@ -402,8 +396,7 @@ def flops(model, model_info, device='cpu'):
     model = copy.deepcopy(model).to(device)
     model.eval()
 
-    inputs = tuple(
-        torch.ones(model_info['input_shapes'][k], dtype=torch.float64, device=device) for k in model_info['input_names'])
+    inputs = tuple(torch.ones(model_info['input_shapes'][k], dtype=torch.float64, device=device) for k in model_info['input_names'])
 
     macs, params = get_model_complexity_info(model, inputs, as_strings=True, print_per_layer_stat=True, verbose=True)
     _logger.info('{:<30}  {:<8}'.format('Computational complexity: ', macs))
@@ -549,7 +542,7 @@ def optim(args, model, device):
                 opt, milestones=[lr_step, 2 * lr_step], gamma=0.1,
                 last_epoch=-1 if args.load_epoch is None else args.load_epoch)
         elif args.lr_scheduler == 'flat+decay':
-#             num_decay_epochs = max(1, int(args.num_epochs * 0.3))
+            #num_decay_epochs = max(1, int(args.num_epochs * 0.3))
             num_decay_epochs = max(1, int(args.num_epochs * 0.7))
             
             milestones = list(range(args.num_epochs - num_decay_epochs, args.num_epochs))
@@ -914,7 +907,6 @@ def _main(args):
 
     # training/testing mode
     training_mode = not args.predict
-    
     # device
     if args.gpus:
         # distributed training

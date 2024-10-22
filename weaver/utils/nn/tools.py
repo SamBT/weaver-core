@@ -262,7 +262,6 @@ def evaluate_classification(model, test_loader, dev, epoch, for_training=True, l
                     labels[k] = v.reshape((entry_count, -1))
         observers = {k: _concat(v) for k, v in observers.items()}
         
-        
         return total_correct / count, scores, labels, observers
 
 
