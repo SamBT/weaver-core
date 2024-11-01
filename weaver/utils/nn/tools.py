@@ -645,17 +645,18 @@ def evaluate_contrastive(model, test_loader, dev, epoch, for_training=True, loss
     _logger.info('Evaluation metrics: \n%s', '\n'.join(
         ['    - %s: \n%s' % (k, str(v)) for k, v in metric_results.items()]))
     
-    if os.path.exists(args.output_file_path):
-        df = pd.read_csv(args.output_file_path)
-    else:
-        df = pd.DataFrame(columns=["epoch", "loss"])
-    if epoch == None:
-        new_data = {"test_loss":total_loss / count}
-    else:
-        new_data = {"epoch": epoch,"loss":total_loss / count}
-    #df = df.append(new_data, ignore_index=True)
-    df = pd.concat([df,pd.DataFrame([new_data])],ignore_index=True)
-    df.to_csv(args.output_file_path, index=False)
+    if not args.predict:
+        if os.path.exists(args.output_file_path):
+            df = pd.read_csv(args.output_file_path)
+        else:
+            df = pd.DataFrame(columns=["epoch", "loss"])
+        if epoch == None:
+            new_data = {"test_loss":total_loss / count}
+        else:
+            new_data = {"epoch": epoch,"loss":total_loss / count}
+        #df = df.append(new_data, ignore_index=True)
+        df = pd.concat([df,pd.DataFrame([new_data])],ignore_index=True)
+        df.to_csv(args.output_file_path, index=False)
 
     
     if for_training:

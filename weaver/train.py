@@ -108,6 +108,9 @@ parser.add_argument('--lr-scheduler', type=str, default='flat+decay',
                     choices=['none', 'steps', 'flat+decay', 'flat+linear', 'flat+cos', 'one-cycle'],
                     help='learning rate scheduler')
 parser.add_argument('--lr-flat-frac', type=float, default=0.7, help='fraction of total steps (n_epoch * steps_per_epoch) to keep lr flat')
+parser.add_argument('--lr-num-cycles', type=float, default=0.5, help='number of cycles (periods) to loop through when using cosine scheduler')
+parser.add_argument('--lr-change-frac',type=float,default=1.0,help='fraction of the steps after --lr-flat-frac during which the LR is changing according to the schedule; after this fraction, the LR will remain the same until completion')
+parser.add_argument('--min-lr-factor',type=float,default=0.001,help='minimum fraction of initial LR that the scheduler can reduce the LR to')
 parser.add_argument('--warmup-steps', type=int, default=0,
                     help='number of warm-up steps, only valid for `flat+linear` and `flat+cos` lr schedulers')
 parser.add_argument('--load-epoch', type=int, default=None,
@@ -171,6 +174,7 @@ parser.add_argument('--inter-man-att',  type=int, default=-1,
                     help='Determines how often inter-manifold attention is applied. For input n, applies inter-manifold after every n^th PM block')
 parser.add_argument('--inter-man-att-method',  type=str, default='dist',choices=['v1', 'v2'],
                     help='Determines which method of inter_manifold attention to use either v1 or v2')
+
 
 
 def to_filelist(args, mode='train'):
@@ -283,9 +287,14 @@ def train_load(args):
                                  infinity_mode=args.steps_per_epoch_val is not None,
                                  in_memory=args.in_memory,
                                  name='val' + ('' if args.local_rank is None else '_rank%d' % args.local_rank))
+    print(f"train workers = {min(args.num_workers, int(len(train_files) * args.file_fraction))}")
     train_loader = DataLoader(train_data, batch_size=args.batch_size, drop_last=True, pin_memory=True,
                               num_workers=min(args.num_workers, int(len(train_files) * args.file_fraction)),
                               persistent_workers=args.num_workers > 0 and args.steps_per_epoch is not None)
+    print(val_files)
+    print(f"val files = {len(val_files)}")
+    print(f"file fraction = {args.file_fraction}")
+    print(f"val workers = {min(args.num_workers, int(len(val_files) * args.file_fraction))}")
     val_loader = DataLoader(val_data, batch_size=args.batch_size, drop_last=True, pin_memory=True,
                             num_workers=min(args.num_workers, int(len(val_files) * args.file_fraction)),
                             persistent_workers=args.num_workers > 0 and args.steps_per_epoch_val is not None)
@@ -396,7 +405,8 @@ def flops(model, model_info, device='cpu'):
     model = copy.deepcopy(model).to(device)
     model.eval()
 
-    inputs = tuple(torch.ones(model_info['input_shapes'][k], dtype=torch.float64, device=device) for k in model_info['input_names'])
+    inputs = tuple(
+        torch.ones(model_info['input_shapes'][k], dtype=torch.float64, device=device) for k in model_info['input_names'])
 
     macs, params = get_model_complexity_info(model, inputs, as_strings=True, print_per_layer_stat=True, verbose=True)
     _logger.info('{:<30}  {:<8}'.format('Computational complexity: ', macs))
@@ -542,7 +552,7 @@ def optim(args, model, device):
                 opt, milestones=[lr_step, 2 * lr_step], gamma=0.1,
                 last_epoch=-1 if args.load_epoch is None else args.load_epoch)
         elif args.lr_scheduler == 'flat+decay':
-            #num_decay_epochs = max(1, int(args.num_epochs * 0.3))
+#             num_decay_epochs = max(1, int(args.num_epochs * 0.3))
             num_decay_epochs = max(1, int(args.num_epochs * 0.7))
             
             milestones = list(range(args.num_epochs - num_decay_epochs, args.num_epochs))
@@ -560,9 +570,10 @@ def optim(args, model, device):
             total_steps = args.num_epochs * args.steps_per_epoch
             warmup_steps = args.warmup_steps
             flat_steps = int(total_steps * args.lr_flat_frac) - 1
+            num_cycles = args.lr_num_cycles
             if warmup_steps > flat_steps:
                 warmup_steps = flat_steps
-            min_factor = 0.001
+            min_factor = args.min_lr_factor
 
             def lr_fn(step_num):
                 if step_num > total_steps:
@@ -573,11 +584,17 @@ def optim(args, model, device):
                     return 1. * step_num / warmup_steps
                 if step_num <= flat_steps:
                     return 1.0
-                pct = (step_num - flat_steps) / (total_steps - flat_steps)
+                pct = (step_num - flat_steps) / (args.lr_change_frac*(total_steps - flat_steps))
                 if args.lr_scheduler == 'flat+linear':
-                    return max(min_factor, 1 - pct)
+                    if pct > 1:
+                        return max(min_factor,0.0)
+                    else:
+                        return max(min_factor, 1 - pct)
                 else:
-                    return max(min_factor, 0.5 * (math.cos(math.pi * pct) + 1))
+                    if pct > 1:
+                        return max(min_factor, 0.5 * (math.cos(2*num_cycles*math.pi * 1) + 1))
+                    else:
+                        return max(min_factor, 0.5 * (math.cos(2*num_cycles*math.pi * pct) + 1))
 
             scheduler = torch.optim.lr_scheduler.LambdaLR(
                 opt, lr_fn, last_epoch=-1 if args.load_epoch is None else args.load_epoch * args.steps_per_epoch)
@@ -607,9 +624,6 @@ def model_setup(args, data_config, device='cpu'):
         
     args_dict = vars(args)
     # Filter the args_dict to only include specific keys
-    
-    
-
     
     filtered_args_dict = {k: args_dict[k] for k in ['part_geom', 'part_dim', 'jet_geom', 'jet_dim','equal_heads','PM_weight_initialization_factor','att_metric','inter_man_att','inter_man_att_method','out_dim'] if k in args_dict}
 
@@ -907,6 +921,7 @@ def _main(args):
 
     # training/testing mode
     training_mode = not args.predict
+    
     # device
     if args.gpus:
         # distributed training
