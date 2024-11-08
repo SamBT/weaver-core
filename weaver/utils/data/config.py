@@ -40,6 +40,7 @@ class DataConfig(object):
             'preprocess': {'method': 'manual', 'data_fraction': 0.1, 'params': None},
             'new_variables': {},
             'inputs': {},
+            'misc': {},
             'labels': {},
             'observers': [],
             'monitor_variables': [],

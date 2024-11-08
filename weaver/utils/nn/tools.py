@@ -588,7 +588,7 @@ def evaluate_contrastive(model, test_loader, dev, epoch, for_training=True, loss
                 embedding = model(*inputs,project=False)
                 projections = model.project(embedding)
                 #label = torch.tensor(label)
-                if not for_training and entry_count < 50000:
+                if not for_training:
                     all_embed.append(embedding)
                     all_project.append(projections)
                     all_labels.append(label)

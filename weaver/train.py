@@ -175,6 +175,8 @@ parser.add_argument('--inter-man-att',  type=int, default=-1,
 parser.add_argument('--inter-man-att-method',  type=str, default='dist',choices=['v1', 'v2'],
                     help='Determines which method of inter_manifold attention to use either v1 or v2')
 
+parser.add_argument('--no-encode-net-options', action='store_true', default=False, help='switch to turn off putting a hex representation of network_options into the directory name when using {auto}')
+
 
 
 def to_filelist(args, mode='train'):
@@ -903,21 +905,26 @@ def _main(args):
         _logger.warning('Use of `file-fraction` is not recommended in general -- prefer using `data-fraction` instead.')
 
     # classification/regression mode
-    if args.regression_mode:
-        _logger.info('Running in regression mode')
-        from weaver.utils.nn.tools import train_regression as train
-        from weaver.utils.nn.tools import evaluate_regression as evaluate
-    elif args.embedding_mode:
-        _logger.info('Running in embedding mode')
-        from weaver.utils.nn.tools import train_embedding as train
-        from weaver.utils.nn.tools import evaluate_embedding as evaluate
-    elif args.contrastive_mode:
-        from weaver.utils.nn.tools import train_contrastive as train
-        from weaver.utils.nn.tools import evaluate_contrastive as evaluate
-    else:
-        _logger.info('Running in classification mode')
-        from weaver.utils.nn.tools import train_classification as train
-        from weaver.utils.nn.tools import evaluate_classification as evaluate
+    network_module = import_module(args.network_config, name='_network_module')
+    try:
+        train = network_module.train
+        evaluate = network_module.evaluate
+    except:
+        if args.regression_mode:
+            _logger.info('Running in regression mode')
+            from weaver.utils.nn.tools import train_regression as train
+            from weaver.utils.nn.tools import evaluate_regression as evaluate
+        elif args.embedding_mode:
+            _logger.info('Running in embedding mode')
+            from weaver.utils.nn.tools import train_embedding as train
+            from weaver.utils.nn.tools import evaluate_embedding as evaluate
+        elif args.contrastive_mode:
+            from weaver.utils.nn.tools import train_contrastive as train
+            from weaver.utils.nn.tools import evaluate_contrastive as evaluate
+        else:
+            _logger.info('Running in classification mode')
+            from weaver.utils.nn.tools import train_classification as train
+            from weaver.utils.nn.tools import evaluate_classification as evaluate
 
     # training/testing mode
     training_mode = not args.predict
@@ -1164,7 +1171,7 @@ def main():
         import hashlib
         import time
         model_name = time.strftime('%Y%m%d-%H%M%S') + "_" + os.path.basename(args.network_config).replace('.py', '')
-        if len(args.network_option):
+        if len(args.network_option) and not args.no_encode_net_options:
             model_name = model_name + "_" + hashlib.md5(str(args.network_option).encode('utf-8')).hexdigest()
         model_name += '_{optim}_lr{lr}_batch{batch}'.format(lr=args.start_lr,
                                                             optim=args.optimizer, batch=args.batch_size)
