@@ -176,6 +176,7 @@ parser.add_argument('--inter-man-att-method',  type=str, default='dist',choices=
                     help='Determines which method of inter_manifold attention to use either v1 or v2')
 
 parser.add_argument('--no-encode-net-options', action='store_true', default=False, help='switch to turn off putting a hex representation of network_options into the directory name when using {auto}')
+parser.add_argument('--save-every',default=-1,type=int,help='epoch interval to save fixed model checkpoint (the latest epoch is always saved, just overwritten every epoch)')
 
 
 
@@ -571,7 +572,7 @@ def optim(args, model, device):
         elif args.lr_scheduler == 'flat+linear' or args.lr_scheduler == 'flat+cos':
             total_steps = args.num_epochs * args.steps_per_epoch
             warmup_steps = args.warmup_steps
-            flat_steps = int(total_steps * args.lr_flat_frac) - 1
+            flat_steps = int(total_steps * args.lr_flat_frac) - 1 if args.lr_flat_frac > 0 else 0
             num_cycles = args.lr_num_cycles
             if warmup_steps > flat_steps:
                 warmup_steps = flat_steps
@@ -584,9 +585,12 @@ def optim(args, model, device):
                             step_num + 1, total_steps))
                 if step_num < warmup_steps:
                     return 1. * step_num / warmup_steps
-                if step_num <= flat_steps:
+                if step_num <= flat_steps and flat_steps > 0:
                     return 1.0
-                pct = (step_num - flat_steps) / (args.lr_change_frac*(total_steps - flat_steps))
+                if flat_steps > 0:
+                    pct = (step_num - flat_steps) / (args.lr_change_frac*(total_steps - flat_steps))
+                else:
+                    pct = (step_num - warmup_steps) / (args.lr_change_frac*(total_steps-warmup_steps))
                 if args.lr_scheduler == 'flat+linear':
                     if pct > 1:
                         return max(min_factor,0.0)
@@ -596,7 +600,8 @@ def optim(args, model, device):
                     if pct > 1:
                         return max(min_factor, 0.5 * (math.cos(2*num_cycles*math.pi * 1) + 1))
                     else:
-                        return max(min_factor, 0.5 * (math.cos(2*num_cycles*math.pi * pct) + 1))
+                        #return max(min_factor, 0.5 * (math.cos(2*num_cycles*math.pi * pct) + 1))
+                        return min_factor + ((1-min_factor)/2) * (math.cos(2*num_cycles*math.pi * pct) + 1)
 
             scheduler = torch.optim.lr_scheduler.LambdaLR(
                 opt, lr_fn, last_epoch=-1 if args.load_epoch is None else args.load_epoch * args.steps_per_epoch)
@@ -1051,8 +1056,15 @@ def _main(args):
                     os.makedirs(dirname)
                 state_dict = model.module.state_dict() if isinstance(
                     model, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else model.state_dict()
-                torch.save(state_dict, args.model_prefix + '_epoch-%d_state.pt' % epoch)
-                torch.save(opt.state_dict(), args.model_prefix + '_epoch-%d_optimizer.pt' % epoch)
+                torch.save(state_dict, args.model_prefix + '_latest_state.pt')
+                torch.save(opt.state_dict(), args.model_prefix + '_latest_optimizer.pt')
+                if args.save_every > 0:
+                    if ((epoch+1) % args.save_every) == 0:
+                        torch.save(state_dict, args.model_prefix + '_epoch-%d_state.pt' % epoch)
+                        torch.save(opt.state_dict(), args.model_prefix + '_epoch-%d_optimizer.pt' % epoch)
+                else: # by default save every epoch if save_every not set
+                    torch.save(state_dict, args.model_prefix + '_epoch-%d_state.pt' % epoch)
+                    torch.save(opt.state_dict(), args.model_prefix + '_epoch-%d_optimizer.pt' % epoch)
             # if args.backend is not None and local_rank == 0:
             # TODO: save checkpoint
             #     save_checkpoint()
@@ -1067,8 +1079,7 @@ def _main(args):
             if is_best_epoch:
                 best_valid_metric = valid_metric
                 if args.model_prefix and (args.backend is None or local_rank == 0):
-                    shutil.copy2(args.model_prefix + '_epoch-%d_state.pt' %
-                                 epoch, args.model_prefix + '_best_epoch_state.pt')
+                    shutil.copy2(args.model_prefix + '_latest_state.pt', args.model_prefix + '_best_epoch_state.pt')
                     # torch.save(model, args.model_prefix + '_best_epoch_full.pt')
             _logger.info('Epoch #%d: Current validation metric: %.5f (best: %.5f)' %
                          (epoch, valid_metric, best_valid_metric), color='bold')
